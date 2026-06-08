@@ -1,0 +1,9 @@
+# Copy this to configs/plugin_manager/config.toml in the Shinobu runtime.
+#
+# Management commands are denied unless one exact value matches the incoming
+# command event. Run `/plugin whoami` from your adapter to inspect these values.
+[auth]
+user_ids = ["your-user-id"]
+senders = []
+sources = []
+chat_ids = []

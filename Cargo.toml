@@ -1,0 +1,18 @@
+[package]
+name = "snb_plugin_manager"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Runtime plugin management commands for Shinobu"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+log = "0"
+snb_core = { path = "../../crates/snb_core" }
+snb_macros = { path = "../../crates/snb_macros" }
+toml = "1"
