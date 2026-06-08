@@ -11,6 +11,7 @@ Runtime plugin management commands for Shinobu.
 /plugin load <library-path>
 /plugin unload <name>
 /plugin reload <name> <library-path>
+/plugin install <github-url> [plugin-dir]
 /plugin update <plugin-dir> [loaded-plugin-name]
 ```
 
@@ -18,6 +19,12 @@ Aliases: `/plugins`, `/pm`.
 
 The plugin refuses to unload or reload itself from its own command handler.
 `update` is also refused when it targets `plugin_manager` itself.
+
+`install` accepts GitHub repository URLs such as
+`https://github.com/owner/repo.git` or `git@github.com:owner/repo.git`. It
+clones the repository into `plugins/<repo>` by default, builds it with
+`cargo build --release --lib`, then loads the produced release shared library.
+Pass `[plugin-dir]` to choose a different local directory name.
 
 `update` expects `<plugin-dir>` to be a single directory name under the runtime
 `plugins/` directory. It runs `git pull --ff-only`, builds the plugin with

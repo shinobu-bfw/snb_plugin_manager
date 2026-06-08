@@ -102,6 +102,16 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             };
             update_plugin(ctx, plugin_dir, args.get(2).map(String::as_str))
         }
+        "install" => {
+            if !ensure_authorized(ctx)? {
+                return Ok(());
+            }
+            let Some(github_url) = args.get(1) else {
+                reply(ctx, "usage: /plugin install <github-url> [plugin-dir]");
+                return Ok(());
+            };
+            install_plugin(ctx, github_url, args.get(2).map(String::as_str))
+        }
         other => {
             reply(
                 ctx,
@@ -277,6 +287,65 @@ fn update_plugin(
     Ok(())
 }
 
+fn install_plugin(
+    ctx: &CommandContext,
+    github_url: &str,
+    plugin_dir_name: Option<&str>,
+) -> anyhow::Result<()> {
+    let derived_dir = github_repo_dir_name(github_url)?;
+    let plugin_dir_name = plugin_dir_name.unwrap_or(&derived_dir);
+    validate_plugin_dir_name(plugin_dir_name)?;
+
+    let plugins_root = std::env::current_dir()?.join("plugins");
+    std::fs::create_dir_all(&plugins_root)?;
+    let plugin_dir = plugins_root.join(plugin_dir_name);
+    if plugin_dir.exists() {
+        anyhow::bail!(
+            "plugin directory already exists: {}. Use /plugin update {} instead.",
+            plugin_dir.display(),
+            plugin_dir_name
+        );
+    }
+
+    run_command(
+        Command::new("git")
+            .arg("clone")
+            .arg(github_url)
+            .arg(plugin_dir_name)
+            .current_dir(&plugins_root),
+    )?;
+
+    if !plugin_dir.join("Cargo.toml").is_file() {
+        anyhow::bail!(
+            "cloned repository does not contain Cargo.toml at {}",
+            plugin_dir.display()
+        );
+    }
+
+    run_command(
+        Command::new("cargo")
+            .arg("build")
+            .arg("--release")
+            .arg("--lib")
+            .current_dir(&plugin_dir),
+    )?;
+
+    let library_path = release_library_path(&plugin_dir)?;
+    snb_core::context::bot()
+        .clone()
+        .load_plugin(&library_path)?;
+
+    let revision = current_revision(&plugin_dir).unwrap_or_else(|_| "unknown".to_string());
+    reply(
+        ctx,
+        format!(
+            "installed {plugin_dir_name} from {github_url} at {revision}, loaded from {}",
+            library_path.display()
+        ),
+    );
+    Ok(())
+}
+
 fn resolve_library_path(path: &str) -> PathBuf {
     let path = PathBuf::from(path);
     if path.is_absolute() {
@@ -289,14 +358,7 @@ fn resolve_library_path(path: &str) -> PathBuf {
 }
 
 fn resolve_plugin_dir(name: &str) -> anyhow::Result<PathBuf> {
-    let path = Path::new(name);
-    let mut components = path.components();
-    let Some(std::path::Component::Normal(_)) = components.next() else {
-        anyhow::bail!("plugin dir must be a directory name under plugins/");
-    };
-    if components.next().is_some() {
-        anyhow::bail!("plugin dir must not contain path separators");
-    }
+    validate_plugin_dir_name(name)?;
 
     let dir = std::env::current_dir()?.join("plugins").join(name);
     if !dir.is_dir() {
@@ -312,6 +374,58 @@ fn resolve_plugin_dir(name: &str) -> anyhow::Result<PathBuf> {
         anyhow::bail!("plugin Cargo.toml not found: {}", dir.display());
     }
     Ok(dir)
+}
+
+fn validate_plugin_dir_name(name: &str) -> anyhow::Result<()> {
+    let path = Path::new(name);
+    let mut components = path.components();
+    let Some(std::path::Component::Normal(component)) = components.next() else {
+        anyhow::bail!("plugin dir must be a directory name under plugins/");
+    };
+    if components.next().is_some() {
+        anyhow::bail!("plugin dir must not contain path separators");
+    }
+    if component.to_string_lossy().starts_with('.') {
+        anyhow::bail!("plugin dir must not start with '.'");
+    }
+    Ok(())
+}
+
+fn github_repo_dir_name(url: &str) -> anyhow::Result<String> {
+    let trimmed = url
+        .trim()
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+    let path = if let Some(rest) = trimmed.strip_prefix("https://github.com/") {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix("http://github.com/") {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix("ssh://git@github.com/") {
+        rest
+    } else {
+        anyhow::bail!("install only accepts GitHub repository URLs");
+    };
+
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let Some(owner) = parts.next() else {
+        anyhow::bail!("GitHub URL is missing owner");
+    };
+    let Some(repo) = parts.next() else {
+        anyhow::bail!("GitHub URL is missing repository");
+    };
+    if parts.next().is_some() {
+        anyhow::bail!("GitHub URL must point to a repository root");
+    }
+    if owner.is_empty() {
+        anyhow::bail!("GitHub URL is missing owner");
+    }
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    validate_plugin_dir_name(repo)?;
+    Ok(repo.to_string())
 }
 
 fn release_library_path(plugin_dir: &Path) -> anyhow::Result<PathBuf> {
@@ -539,6 +653,7 @@ fn help_text() -> &'static str {
 /plugin load <library-path>
 /plugin unload <name>
 /plugin reload <name> <library-path>
+/plugin install <github-url> [plugin-dir]
 /plugin update <plugin-dir> [loaded-plugin-name]"
 }
 
@@ -669,5 +784,31 @@ senders = ["stdin"]
     fn cargo_library_name_reads_package_name() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         assert_eq!(cargo_library_name(&manifest).unwrap(), "snb_plugin_manager");
+    }
+
+    #[test]
+    fn github_repo_dir_name_reads_https_url() {
+        assert_eq!(
+            github_repo_dir_name("https://github.com/owner/my-plugin.git").unwrap(),
+            "my-plugin"
+        );
+    }
+
+    #[test]
+    fn github_repo_dir_name_reads_ssh_url() {
+        assert_eq!(
+            github_repo_dir_name("git@github.com:owner/my-plugin.git").unwrap(),
+            "my-plugin"
+        );
+    }
+
+    #[test]
+    fn github_repo_dir_name_rejects_non_github_url() {
+        assert!(github_repo_dir_name("https://example.com/owner/repo.git").is_err());
+    }
+
+    #[test]
+    fn github_repo_dir_name_rejects_subpath_url() {
+        assert!(github_repo_dir_name("https://github.com/owner/repo/tree/main").is_err());
     }
 }
