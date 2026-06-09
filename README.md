@@ -8,17 +8,22 @@ Runtime plugin management commands for Shinobu.
 /id
 /plugin list
 /plugin info <name>
-/plugin load <library-path>
+/plugin load <name|dir|library-path>
 /plugin unload <name>
-/plugin reload <name> <library-path>
+/plugin reload <name> [name|dir|library-path]
 /plugin install <github-url> [plugin-dir]
-/plugin update <plugin-dir> [loaded-plugin-name]
+/plugin update <name|dir> [loaded-plugin-name]
 ```
 
 Aliases: `/plugins`, `/pm`.
 
-The plugin refuses to unload or reload itself from its own command handler.
-`update` is also refused when it targets `plugin_manager` itself.
+`list` shows both loaded runtime plugins and local plugin source directories
+under `plugins/`, including plugins that have not been loaded yet. Names are
+matched by runtime plugin name, package name, directory name, generated
+`snb.toml` package name, and short aliases such as `tg` for `snb_adapter_tg`.
+
+The plugin refuses to unload, reload, or update itself from its own command
+handler.
 
 `install` accepts GitHub repository URLs such as
 `https://github.com/owner/repo.git` or `git@github.com:owner/repo.git`. It
@@ -26,11 +31,12 @@ clones the repository into `plugins/<repo>` by default, builds it with
 `cargo build --release --lib`, then loads the produced release shared library.
 Pass `[plugin-dir]` to choose a different local directory name.
 
-`update` expects `<plugin-dir>` to be a single directory name under the runtime
-`plugins/` directory. It runs `git pull --ff-only`, builds the plugin with
-`cargo build --release --lib`, then reloads the produced release shared library.
-Pass `[loaded-plugin-name]` when the runtime plugin name differs from the
-directory name.
+`update` accepts a runtime name, package name, short name, directory name, or
+`plugins/<dir>` path. It runs `git pull --ff-only` when the plugin directory is
+its own git repository, builds through the root `cargo xtask build-plugin ...
+--release` path, then loads or reloads the produced shared library. Pass
+`[loaded-plugin-name]` only when automatic matching cannot tell which loaded
+runtime plugin belongs to that local source directory.
 
 ## Authorization
 
