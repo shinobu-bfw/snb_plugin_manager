@@ -2,26 +2,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use snb_core::command::CommandContext;
-use snb_core::event::{Event, Message};
+use snb_core::event::{Event, Message, TextFormat};
 use snb_core::plugin::{PluginInfo, PluginType};
 use snb_macros::{command, plugin};
 
 const PLUGIN_NAME: &str = "plugin_manager";
-const CONFIG_FILE: &str = "config.toml";
-const DEFAULT_CONFIG: &str = r#"# Shinobu plugin manager authorization.
-#
-# Management commands are denied unless one of these exact values matches the
-# incoming command event. Use `/plugin whoami` to inspect the values for your
-# adapter.
-[auth]
-user_ids = []
-senders = []
-sources = []
-chat_ids = []
-"#;
 
 #[command(name = "plugin", aliases = ["plugins", "pm"])]
 fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
+    if !is_admin_event(ctx.event) {
+        return Ok(());
+    }
+
     let result = handle_command(ctx);
     if let Err(error) = &result {
         reply(ctx, format!("plugin manager error: {error:#}"));
@@ -29,12 +21,15 @@ fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
     result
 }
 
+#[command(name = "id")]
+fn id_command(ctx: &CommandContext) -> anyhow::Result<()> {
+    reply_formatted(ctx, identity_markdown(ctx.event), TextFormat::Markdown);
+    Ok(())
+}
+
 fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
     let args = parse_args(ctx.args)?;
     let Some(command) = args.first().map(|arg| arg.as_str()) else {
-        if !ensure_authorized(ctx)? {
-            return Ok(());
-        }
         return list_plugins(ctx);
     };
 
@@ -43,15 +38,8 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             reply(ctx, help_text());
             Ok(())
         }
-        "whoami" | "auth" => {
-            reply(ctx, whoami_text(ctx)?);
-            Ok(())
-        }
         "list" | "ls" => list_plugins(ctx),
         "info" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let Some(name) = args.get(1) else {
                 reply(ctx, "usage: /plugin info <name>");
                 return Ok(());
@@ -60,9 +48,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             Ok(())
         }
         "load" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let Some(path) = args.get(1) else {
                 reply(ctx, "usage: /plugin load <library-path>");
                 return Ok(());
@@ -70,9 +55,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             load_plugin(ctx, path)
         }
         "unload" | "remove" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let Some(name) = args.get(1) else {
                 reply(ctx, "usage: /plugin unload <name>");
                 return Ok(());
@@ -80,9 +62,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             unload_plugin(ctx, name)
         }
         "reload" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let (Some(name), Some(path)) = (args.get(1), args.get(2)) else {
                 reply(ctx, "usage: /plugin reload <name> <library-path>");
                 return Ok(());
@@ -90,9 +69,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             reload_plugin(ctx, name, path)
         }
         "update" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let Some(plugin_dir) = args.get(1) else {
                 reply(
                     ctx,
@@ -103,9 +79,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
             update_plugin(ctx, plugin_dir, args.get(2).map(String::as_str))
         }
         "install" => {
-            if !ensure_authorized(ctx)? {
-                return Ok(());
-            }
             let Some(github_url) = args.get(1) else {
                 reply(ctx, "usage: /plugin install <github-url> [plugin-dir]");
                 return Ok(());
@@ -123,10 +96,6 @@ fn handle_command(ctx: &CommandContext) -> anyhow::Result<()> {
 }
 
 fn list_plugins(ctx: &CommandContext) -> anyhow::Result<()> {
-    if !ensure_authorized(ctx)? {
-        return Ok(());
-    }
-
     let bot = snb_core::context::bot();
     let mut names = bot.list_plugins();
     names.sort();
@@ -499,6 +468,17 @@ fn run_command(command: &mut Command) -> anyhow::Result<Output> {
 
 fn reply(ctx: &CommandContext, text: impl Into<String>) {
     let mut response = Event::message(PLUGIN_NAME, text.into());
+    route_reply(ctx, &mut response);
+    snb_core::context::bot().emit_event(response);
+}
+
+fn reply_formatted(ctx: &CommandContext, text: impl Into<String>, format: TextFormat) {
+    let mut response = Event::formatted_message(PLUGIN_NAME, text.into(), format);
+    route_reply(ctx, &mut response);
+    snb_core::context::bot().emit_event(response);
+}
+
+fn route_reply(ctx: &CommandContext, response: &mut Event) {
     if let Some(message) = &ctx.event.message {
         response.message.as_mut().unwrap().to = message.to.clone();
         response.message.as_mut().unwrap().reply_to = message.id.clone();
@@ -506,118 +486,48 @@ fn reply(ctx: &CommandContext, text: impl Into<String>) {
     if let Some(sender) = &ctx.event.sender {
         response.receiver = Some(sender.clone());
     }
-    snb_core::context::bot().emit_event(response);
 }
 
-struct AuthConfig {
-    user_ids: Vec<String>,
-    senders: Vec<String>,
-    sources: Vec<String>,
-    chat_ids: Vec<String>,
+fn is_admin_event(event: &Event) -> bool {
+    event
+        .message
+        .as_ref()
+        .is_some_and(|message| message.is_admin)
 }
 
-impl AuthConfig {
-    fn from_toml(input: &str) -> anyhow::Result<Self> {
-        let table = input.parse::<toml::Table>()?;
-        let auth = table
-            .get("auth")
-            .and_then(toml::Value::as_table)
-            .ok_or_else(|| anyhow::anyhow!("{CONFIG_FILE} must contain an [auth] table"))?;
-
-        Ok(Self {
-            user_ids: string_list(auth, "user_ids")?,
-            senders: string_list(auth, "senders")?,
-            sources: string_list(auth, "sources")?,
-            chat_ids: string_list(auth, "chat_ids")?,
-        })
-    }
-
-    fn is_authorized(&self, event: &Event) -> bool {
-        let message = event.message.as_ref();
-        exact_match(&self.user_ids, message.and_then(|m| m.from.as_deref()))
-            || exact_match(&self.senders, event.sender.as_deref())
-            || exact_match(&self.sources, Some(event.source.as_str()))
-            || exact_match(&self.chat_ids, message.and_then(|m| m.to.as_deref()))
-    }
-}
-
-fn string_list(table: &toml::Table, key: &str) -> anyhow::Result<Vec<String>> {
-    let Some(value) = table.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(items) = value.as_array() else {
-        anyhow::bail!("[auth].{key} must be an array of strings");
-    };
-
-    let mut strings = Vec::with_capacity(items.len());
-    for item in items {
-        let Some(value) = item.as_str() else {
-            anyhow::bail!("[auth].{key} must contain only strings");
-        };
-        strings.push(value.to_string());
-    }
-    Ok(strings)
-}
-
-fn exact_match(allowed: &[String], value: Option<&str>) -> bool {
-    let Some(value) = value else {
-        return false;
-    };
-    allowed.iter().any(|item| item == value)
-}
-
-fn ensure_authorized(ctx: &CommandContext) -> anyhow::Result<bool> {
-    let (auth, created_default) = load_auth_config()?;
-    if auth.is_authorized(ctx.event) {
-        return Ok(true);
-    }
-
-    let mut text = String::from("not authorized for plugin management");
-    if created_default {
-        text.push_str("\ncreated default config: configs/plugin_manager/config.toml");
-    }
-    text.push_str("\n\ncurrent identity:\n");
-    text.push_str(&identity_text(ctx.event));
-    text.push_str("\n\nAdd an exact value to [auth].user_ids, senders, sources, or chat_ids.");
-    reply(ctx, text);
-    Ok(false)
-}
-
-fn load_auth_config() -> anyhow::Result<(AuthConfig, bool)> {
-    let helper = snb_core::context::PluginHelper::new(PLUGIN_NAME);
-    match helper.load_config(Path::new(CONFIG_FILE)) {
-        Ok(config) => Ok((AuthConfig::from_toml(&config)?, false)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            helper.write_config(Path::new(CONFIG_FILE), DEFAULT_CONFIG)?;
-            Ok((AuthConfig::from_toml(DEFAULT_CONFIG)?, true))
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn whoami_text(ctx: &CommandContext) -> anyhow::Result<String> {
-    let (auth, created_default) = load_auth_config()?;
-    let authorized = auth.is_authorized(ctx.event);
-    let mut text = format!(
-        "authorized: {}\n{}",
-        if authorized { "yes" } else { "no" },
-        identity_text(ctx.event)
-    );
-    if created_default {
-        text.push_str("\ncreated default config: configs/plugin_manager/config.toml");
-    }
-    Ok(text)
-}
-
-fn identity_text(event: &Event) -> String {
+fn identity_markdown(event: &Event) -> String {
     let message = event.message.as_ref();
     format!(
-        "source: {}\nsender: {}\nfrom: {}\nchat: {}",
-        event.source,
-        event.sender.as_deref().unwrap_or("-"),
-        message_value(message, |message| message.from.as_deref()),
-        message_value(message, |message| message.to.as_deref())
+        "*Identity*\nsource: `{}`\nsender: `{}`\nchat id: `{}`\nuser id: `{}`\nmessage id: `{}`\nreply to: `{}`\nchat type: `{}`\nadmin: `{}`",
+        markdown_code(&event.source),
+        markdown_code(event.sender.as_deref().unwrap_or("-")),
+        markdown_code(message_value(message, |message| message.to.as_deref())),
+        markdown_code(message_value(message, |message| message.from.as_deref())),
+        markdown_code(message_value(message, |message| message.id.as_deref())),
+        markdown_code(message_value(message, |message| message
+            .reply_to
+            .as_deref())),
+        markdown_code(
+            message
+                .and_then(|message| message.chat_type.as_ref())
+                .map(chat_type_name)
+                .unwrap_or("-")
+        ),
+        message.is_some_and(|message| message.is_admin)
     )
+}
+
+fn markdown_code(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('`', "\\`")
+}
+
+fn chat_type_name(chat_type: &snb_core::event::ChatType) -> &'static str {
+    match chat_type {
+        snb_core::event::ChatType::Private => "private",
+        snb_core::event::ChatType::Group => "group",
+        snb_core::event::ChatType::Guild => "guild",
+        snb_core::event::ChatType::Other(_) => "other",
+    }
 }
 
 fn message_value<'a>(
@@ -647,7 +557,6 @@ fn plugin_type_name(plugin_type: &PluginType) -> &'static str {
 
 fn help_text() -> &'static str {
     "usage:
-/plugin whoami
 /plugin list
 /plugin info <name>
 /plugin load <library-path>
@@ -719,53 +628,23 @@ mod tests {
     }
 
     #[test]
-    fn auth_config_reads_allow_lists() {
-        let config = AuthConfig::from_toml(
-            r#"[auth]
-user_ids = ["u1"]
-senders = ["stdin"]
-sources = ["telegram"]
-chat_ids = ["c1"]
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.user_ids, vec!["u1"]);
-        assert_eq!(config.senders, vec!["stdin"]);
-        assert_eq!(config.sources, vec!["telegram"]);
-        assert_eq!(config.chat_ids, vec!["c1"]);
-    }
-
-    #[test]
-    fn auth_config_denies_by_default() {
-        let config = AuthConfig::from_toml(DEFAULT_CONFIG).unwrap();
+    fn auth_denies_when_message_is_missing() {
         let event = Event::command("stdin", "plugin", "list").with_sender("stdin");
-        assert!(!config.is_authorized(&event));
+        assert!(!is_admin_event(&event));
     }
 
     #[test]
-    fn auth_config_allows_matching_user() {
-        let config = AuthConfig::from_toml(
-            r#"[auth]
-user_ids = ["admin"]
-"#,
-        )
-        .unwrap();
+    fn auth_denies_non_admin_message() {
         let mut event = Event::message("telegram", "/plugin list");
-        event.message.as_mut().unwrap().from = Some("admin".to_string());
-        assert!(config.is_authorized(&event));
+        event.message.as_mut().unwrap().is_admin = false;
+        assert!(!is_admin_event(&event));
     }
 
     #[test]
-    fn auth_config_allows_matching_sender() {
-        let config = AuthConfig::from_toml(
-            r#"[auth]
-senders = ["stdin"]
-"#,
-        )
-        .unwrap();
-        let event = Event::command("stdin", "plugin", "list").with_sender("stdin");
-        assert!(config.is_authorized(&event));
+    fn auth_allows_admin_message() {
+        let mut event = Event::message("telegram", "/plugin list");
+        event.message.as_mut().unwrap().is_admin = true;
+        assert!(is_admin_event(&event));
     }
 
     #[test]

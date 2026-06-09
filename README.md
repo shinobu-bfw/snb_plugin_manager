@@ -5,7 +5,7 @@ Runtime plugin management commands for Shinobu.
 ## Commands
 
 ```text
-/plugin whoami
+/id
 /plugin list
 /plugin info <name>
 /plugin load <library-path>
@@ -34,25 +34,11 @@ directory name.
 
 ## Authorization
 
-Management commands are denied by default. On first use the plugin creates:
+Management commands require `event.message.is_admin == true`.
+Non-admin `/plugin ...` commands are ignored without a reply.
 
-```text
-configs/plugin_manager/config.toml
-```
-
-Run `/plugin whoami` from your adapter, then add one of the exact values to the
-config:
-
-```toml
-[auth]
-user_ids = ["your-user-id"]
-senders = []
-sources = []
-chat_ids = []
-```
-
-`user_ids` matches `message.from`, `senders` matches `event.sender`, `sources`
-matches `event.source`, and `chat_ids` matches `message.to`.
+Run `/id` to inspect the current event identity and admin flag. `/id` is public
+and can reply to ordinary users.
 
 ## Build
 
