@@ -216,7 +216,7 @@ fn info_plugin(ctx: &CommandContext, name: &str) -> anyhow::Result<()> {
         ));
         match local.existing_library_path(&index.root) {
             Some(path) => kv.push(("loadable", path.display().to_string())),
-            None => kv.push(("loadable", "missing".to_string())),
+            None => kv.push(("loadable", "missing; run /plugin update first".to_string())),
         }
         if local.dir.join(".git").is_dir() {
             kv.push((

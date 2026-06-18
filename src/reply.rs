@@ -14,22 +14,22 @@ pub(crate) fn reply_html(ctx: &CommandContext, html: impl Into<String>) {
     reply_formatted(ctx, html, TextFormat::Html);
 }
 
-/// Escape a dynamic value so it is safe to embed in HTML-formatted text.
+/// Escape a value for safe use in HTML text or a quoted attribute value.
+/// `&` is escaped first so the entities below aren't double-escaped.
 pub(crate) fn esc(value: impl AsRef<str>) -> String {
     value
         .as_ref()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
-/// Code-block language tag. An explicit (neutral) language stops Telegram from
-/// auto-detecting one and syntax-highlighting our tables/panes as shell.
-const PRE_LANG: &str = "text";
-
-/// Escape `raw` and wrap it in a language-tagged Telegram `<pre>` code block.
+/// Escape `raw` and wrap it in a plain `<pre>` monospace block. No `language-`
+/// class is set, so Telegram applies no syntax highlighting.
 pub(crate) fn pre_block(raw: impl AsRef<str>) -> String {
-    format!("<pre><code class=\"{PRE_LANG}\">{}</code></pre>", esc(raw))
+    format!("<pre>{}</pre>", esc(raw))
 }
 
 /// Render aligned `key   value` rows as a Telegram `<pre>` pane (keys are
@@ -53,3 +53,7 @@ fn route_reply(ctx: &CommandContext, response: &mut Event) {
         response.receiver = Some(sender.clone());
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/reply_tests.rs"]
+mod reply_tests;
