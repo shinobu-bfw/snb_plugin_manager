@@ -5,7 +5,7 @@ mod process;
 mod reply;
 
 use snb_core::command::CommandContext;
-use snb_core::event::{Event, Message, TextFormat};
+use snb_core::event::{Event, Message};
 use snb_macros::{command, plugin};
 
 pub(crate) const PLUGIN_NAME: &str = "plugin_manager";
@@ -18,14 +18,17 @@ fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
 
     let result = commands::handle(ctx);
     if let Err(error) = &result {
-        reply::reply(ctx, format!("plugin manager error: {error:#}"));
+        reply::reply_html(
+            ctx,
+            format!("⚠️ <b>error:</b> {}", reply::esc(format!("{error:#}"))),
+        );
     }
     result
 }
 
 #[command(name = "id")]
 fn id_command(ctx: &CommandContext) -> anyhow::Result<()> {
-    reply::reply_formatted(ctx, identity_markdown(ctx.event), TextFormat::Markdown);
+    reply::reply_html(ctx, identity_pane(ctx.event));
     Ok(())
 }
 
@@ -36,30 +39,34 @@ fn is_admin_event(event: &Event) -> bool {
         .is_some_and(|message| message.is_admin)
 }
 
-fn identity_markdown(event: &Event) -> String {
+fn identity_pane(event: &Event) -> String {
     let message = event.message.as_ref();
-    format!(
-        "*Identity*\nsource: `{}`\nsender: `{}`\nchat id: `{}`\nuser id: `{}`\nmessage id: `{}`\nreply to: `{}`\nchat type: `{}`\nadmin: `{}`",
-        markdown_code(&event.source),
-        markdown_code(event.sender.as_deref().unwrap_or("-")),
-        markdown_code(message_value(message, |message| message.to.as_deref())),
-        markdown_code(message_value(message, |message| message.from.as_deref())),
-        markdown_code(message_value(message, |message| message.id.as_deref())),
-        markdown_code(message_value(message, |message| message
-            .reply_to
-            .as_deref())),
-        markdown_code(
+    let rows: Vec<(&str, String)> = vec![
+        ("source", event.source.clone()),
+        ("sender", event.sender.clone().unwrap_or_else(|| "-".to_string())),
+        ("chat id", message_value(message, |message| message.to.as_deref()).to_string()),
+        ("user id", message_value(message, |message| message.from.as_deref()).to_string()),
+        ("message id", message_value(message, |message| message.id.as_deref()).to_string()),
+        ("reply to", message_value(message, |message| message.reply_to.as_deref()).to_string()),
+        (
+            "chat type",
             message
                 .and_then(|message| message.chat_type.as_ref())
                 .map(chat_type_name)
                 .unwrap_or("-")
+                .to_string(),
         ),
-        message.is_some_and(|message| message.is_admin)
-    )
-}
-
-fn markdown_code(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('`', "\\`")
+        (
+            "admin",
+            if message.is_some_and(|message| message.is_admin) {
+                "yes"
+            } else {
+                "no"
+            }
+            .to_string(),
+        ),
+    ];
+    format!("<b>Identity</b>\n{}", reply::pre_kv(&rows))
 }
 
 fn chat_type_name(chat_type: &snb_core::event::ChatType) -> &'static str {
