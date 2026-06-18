@@ -8,7 +8,7 @@ use snb_core::command::CommandContext;
 use snb_core::event::{Event, Message};
 use snb_macros::{command, plugin};
 
-pub(crate) const PLUGIN_NAME: &str = "plugin_manager";
+pub(crate) const PLUGIN_NAME: &str = "PluginManager";
 
 #[command(name = "plugin", aliases = ["plugins", "pm"])]
 fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
@@ -85,7 +85,7 @@ fn message_value<'a>(
     message.and_then(value).unwrap_or("-")
 }
 
-#[plugin(name = "plugin_manager", version = "0.1.0", kind = Plugin)]
+#[plugin(name = "PluginManager", version = "0.1.1", kind = Plugin)]
 struct PluginManager;
 
 #[cfg(test)]

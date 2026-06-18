@@ -252,7 +252,7 @@ fn unload_plugin(ctx: &CommandContext, name: &str) -> anyhow::Result<()> {
     let index = PluginIndex::discover()?;
     let loaded_name = index.resolve_loaded_name(name)?;
     if loaded_name == PLUGIN_NAME {
-        reply_html(ctx, "⚠️ refusing to unload plugin_manager from its own command");
+        reply_html(ctx, format!("⚠️ refusing to unload {PLUGIN_NAME} from its own command"));
         return Ok(());
     }
 
@@ -267,7 +267,7 @@ fn reload_plugin(ctx: &CommandContext, name: &str, target: Option<&str>) -> anyh
     let index = PluginIndex::discover()?;
     let loaded_name = index.resolve_loaded_name(name)?;
     if loaded_name == PLUGIN_NAME {
-        reply_html(ctx, "⚠️ refusing to reload plugin_manager from its own command");
+        reply_html(ctx, format!("⚠️ refusing to reload {PLUGIN_NAME} from its own command"));
         return Ok(());
     }
 
@@ -314,7 +314,7 @@ fn update_plugin(
     };
 
     if local.matches_query(PLUGIN_NAME) || loaded_name.as_deref() == Some(PLUGIN_NAME) {
-        reply_html(ctx, "⚠️ refusing to update plugin_manager from its own command");
+        reply_html(ctx, format!("⚠️ refusing to update {PLUGIN_NAME} from its own command"));
         return Ok(());
     }
 

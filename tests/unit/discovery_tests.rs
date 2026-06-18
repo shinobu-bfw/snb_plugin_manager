@@ -23,35 +23,29 @@ fn cargo_library_name_reads_package_name() {
 
 #[test]
 fn plugin_attribute_name_is_extracted() {
-    let content = r#"#[plugin(name = "plugin_manager", version = "0.1.0", kind = Plugin)]"#;
+    let content = r#"#[plugin(name = "PluginManager", version = "0.1.1", kind = Plugin)]"#;
     assert_eq!(
         extract_plugin_attribute_names(content),
-        vec!["plugin_manager"]
+        vec!["PluginManager"]
     );
 }
 
 #[test]
 fn const_backed_name_method_is_extracted() {
     let content = r#"
-        const PLUGIN_NAME: &str = "PayloadExtractBot";
-        impl SnbPlugin for PayloadExtractBot {
+        const PLUGIN_NAME: &str = "PayloadExtract";
+        impl SnbPlugin for PayloadExtract {
             fn name(&self) -> &str { PLUGIN_NAME }
         }
     "#;
-    assert_eq!(extract_declared_names(content), vec!["PayloadExtractBot"]);
+    assert_eq!(extract_declared_names(content), vec!["PayloadExtract"]);
 }
 
 #[test]
 fn fuzzy_matching_handles_prefixes_suffixes_and_case() {
     assert!(identifier_matches("snb_adapter_tg", "tg"));
-    assert!(identifier_matches(
-        "PayloadExtractBot",
-        "payload_extract_bot"
-    ));
-    assert!(identifier_matches(
-        "payload_extract_bot-rs",
-        "payload_extract_bot"
-    ));
+    assert!(identifier_matches("PayloadExtract", "payload_extract"));
+    assert!(identifier_matches("payload_extract-rs", "payload_extract"));
 }
 
 #[test]
