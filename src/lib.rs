@@ -10,12 +10,13 @@ use snb_macros::{command, plugin};
 
 pub(crate) const PLUGIN_NAME: &str = "PluginManager";
 
-#[command(name = "plugin", aliases = ["plugins", "pm"])]
+#[command(
+    name = "plugin",
+    aliases = ["plugins", "pm"],
+    description = "Manage runtime plugins (admin only)",
+    visibility = Admin
+)]
 fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
-    if !is_admin_event(ctx.event) {
-        return Ok(());
-    }
-
     let result = commands::handle(ctx);
     if let Err(error) = &result {
         reply::reply_html(
@@ -26,17 +27,10 @@ fn plugin_command(ctx: &CommandContext) -> anyhow::Result<()> {
     result
 }
 
-#[command(name = "id")]
+#[command(name = "id", description = "Show chat & user identity")]
 fn id_command(ctx: &CommandContext) -> anyhow::Result<()> {
     reply::reply_html(ctx, identity_pane(ctx.event));
     Ok(())
-}
-
-fn is_admin_event(event: &Event) -> bool {
-    event
-        .message
-        .as_ref()
-        .is_some_and(|message| message.is_admin)
 }
 
 fn identity_pane(event: &Event) -> String {

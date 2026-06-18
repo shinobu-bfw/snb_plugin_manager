@@ -1,23 +1,22 @@
 use super::*;
 
 #[test]
-fn auth_denies_when_message_is_missing() {
-    let event = Event::command("stdin", "plugin", "list").with_sender("stdin");
-    assert!(!is_admin_event(&event));
-}
+fn plugin_command_is_admin_with_description_and_id_is_public() {
+    use snb_core::command::{CommandHandler, CommandVisibility};
 
-#[test]
-fn auth_denies_non_admin_message() {
-    let mut event = Event::message("telegram", "/plugin list");
-    event.message.as_mut().unwrap().is_admin = false;
-    assert!(!is_admin_event(&event));
-}
+    // `__SnbCommand_<fn>` is the unit struct the `#[command]` macro generates for
+    // each annotated function; it lives in this crate's root module, so the test
+    // can construct it directly. This asserts the security-critical declaration:
+    // `/plugin` must be admin-scoped, `/id` public, both with a description.
+    let plugin = crate::__SnbCommand_plugin_command;
+    assert_eq!(plugin.name(), "plugin");
+    assert_eq!(plugin.visibility(), CommandVisibility::Admin);
+    assert!(!plugin.description().is_empty());
 
-#[test]
-fn auth_allows_admin_message() {
-    let mut event = Event::message("telegram", "/plugin list");
-    event.message.as_mut().unwrap().is_admin = true;
-    assert!(is_admin_event(&event));
+    let id = crate::__SnbCommand_id_command;
+    assert_eq!(id.name(), "id");
+    assert_eq!(id.visibility(), CommandVisibility::Public);
+    assert!(!id.description().is_empty());
 }
 
 #[test]
