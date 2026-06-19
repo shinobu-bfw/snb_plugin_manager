@@ -5,7 +5,7 @@ mod process;
 mod reply;
 
 use snb_core::command::CommandContext;
-use snb_core::event::{Event, Message};
+use snb_core::event::Event;
 use snb_macros::{command, plugin};
 
 pub(crate) const PLUGIN_NAME: &str = "PluginManager";
@@ -35,24 +35,33 @@ fn id_command(ctx: &CommandContext) -> anyhow::Result<()> {
 
 fn identity_pane(event: &Event) -> String {
     let message = event.message.as_ref();
+    let sender = message.and_then(|m| m.sender.as_ref());
+    let chat = message.map(|m| &m.chat);
+    let opt = |value: Option<&str>| value.unwrap_or("-").to_string();
     let rows: Vec<(&str, String)> = vec![
         ("source", event.source.clone()),
-        ("sender", event.sender.clone().unwrap_or_else(|| "-".to_string())),
-        ("chat id", message_value(message, |message| message.to.as_deref()).to_string()),
-        ("user id", message_value(message, |message| message.from.as_deref()).to_string()),
-        ("message id", message_value(message, |message| message.id.as_deref()).to_string()),
-        ("reply to", message_value(message, |message| message.reply_to.as_deref()).to_string()),
+        (
+            "via",
+            event.reply_plugin.clone().unwrap_or_else(|| "-".to_string()),
+        ),
+        ("chat id", opt(chat.map(|c| c.id.as_str()))),
+        ("chat title", opt(chat.and_then(|c| c.title.as_deref()))),
         (
             "chat type",
-            message
-                .and_then(|message| message.chat_type.as_ref())
+            chat.and_then(|c| c.kind.as_ref())
                 .map(chat_type_name)
                 .unwrap_or("-")
                 .to_string(),
         ),
+        ("user id", opt(sender.map(|s| s.id.as_str()))),
+        ("username", opt(sender.and_then(|s| s.username.as_deref()))),
+        ("name", opt(sender.and_then(|s| s.display_name.as_deref()))),
+        ("language", opt(sender.and_then(|s| s.language.as_deref()))),
+        ("message id", opt(message.and_then(|m| m.id.as_deref()))),
+        ("reply to", opt(message.and_then(|m| m.reply_to.as_deref()))),
         (
             "admin",
-            if message.is_some_and(|message| message.is_admin) {
+            if message.is_some_and(|m| m.is_admin) {
                 "yes"
             } else {
                 "no"
@@ -67,16 +76,9 @@ fn chat_type_name(chat_type: &snb_core::event::ChatType) -> &'static str {
     match chat_type {
         snb_core::event::ChatType::Private => "private",
         snb_core::event::ChatType::Group => "group",
-        snb_core::event::ChatType::Guild => "guild",
+        snb_core::event::ChatType::Channel => "channel",
         snb_core::event::ChatType::Other(_) => "other",
     }
-}
-
-fn message_value<'a>(
-    message: Option<&'a Message>,
-    value: impl FnOnce(&'a Message) -> Option<&'a str>,
-) -> &'a str {
-    message.and_then(value).unwrap_or("-")
 }
 
 #[plugin(name = "PluginManager", version = "0.1.1", kind = Plugin)]

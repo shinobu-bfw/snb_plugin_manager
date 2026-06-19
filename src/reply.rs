@@ -46,11 +46,12 @@ pub(crate) fn pre_kv(rows: &[(&str, String)]) -> String {
 
 fn route_reply(ctx: &CommandContext, response: &mut Event) {
     if let Some(message) = &ctx.event.message {
-        response.message.as_mut().unwrap().to = message.to.clone();
-        response.message.as_mut().unwrap().reply_to = message.id.clone();
+        let out = response.message.as_mut().unwrap();
+        out.chat = message.chat.clone();
+        out.reply_to = message.id.clone();
     }
-    if let Some(sender) = &ctx.event.sender {
-        response.receiver = Some(sender.clone());
+    if let Some(plugin) = &ctx.event.reply_plugin {
+        response.target_plugin = Some(plugin.clone());
     }
 }
 
